@@ -3,6 +3,7 @@ defmodule Algolia do
   Elixir implementation of Algolia search API, using Hackney for http requests
   """
 
+  alias Algolia.Config
   alias Algolia.Paths
 
   defmodule MissingApplicationIDError do
@@ -29,30 +30,26 @@ defmodule Algolia do
     defexception message: "The ObjectID cannot be an empty string"
   end
 
-  def application_id do
-    System.get_env("ALGOLIA_APPLICATION_ID") || Application.get_env(:algolia, :application_id) ||
-      raise MissingApplicationIDError
-  end
+  defdelegate application_id, to: Algolia.Config, as: :application_id_from_env!
 
-  def api_key do
-    System.get_env("ALGOLIA_API_KEY") || Application.get_env(:algolia, :api_key) ||
-      raise MissingAPIKeyError
-  end
+  defdelegate api_key, to: Algolia.Config, as: :api_key_from_env!
 
-  defp host(:read, 0), do: "#{application_id()}-dsn.algolia.net"
-  defp host(:write, 0), do: "#{application_id()}.algolia.net"
-
-  defp host(_read_or_write, curr_retry) when curr_retry <= 3,
-    do: "#{application_id()}-#{curr_retry}.algolianet.com"
+  @type config_opt :: {:config, Config.t()}
 
   @doc """
   Multiple queries
   """
   def multi(queries, opts \\ []) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     path = Paths.multiple_queries(opts[:strategy])
     body = queries |> format_multi() |> Jason.encode!()
 
-    send_request(:read, %{method: :post, path: path, body: body, options: opts[:request_options]})
+    send_request(config, :read, %{
+      method: :post,
+      path: path,
+      body: body,
+      options: opts[:request_options]
+    })
   end
 
   defp format_multi(queries) do
@@ -79,11 +76,12 @@ defmodule Algolia do
   Search a single index
   """
   def search(index, query, opts \\ []) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     {request_options, opts} = Keyword.pop(opts, :request_options)
 
     path = Paths.search(index, query, opts)
 
-    send_request(:read, %{method: :get, path: path, options: request_options})
+    send_request(config, :read, %{method: :get, path: path, options: request_options})
   end
 
   @doc """
@@ -132,10 +130,12 @@ defmodule Algolia do
         }
       }
   """
-  @spec search_for_facet_values(binary, binary, binary, map) ::
+  @spec search_for_facet_values(binary, binary, binary, map, [config_opt]) ::
           {:ok, map} | {:error, code :: integer, message :: binary}
-  def search_for_facet_values(index, facet, text, query \\ %{})
-      when is_binary(index) and is_binary(facet) and is_binary(text) do
+  def search_for_facet_values(index, facet, text, query \\ %{}, opts \\ [])
+      when is_binary(index) and is_binary(facet) and is_binary(text)
+      when is_list(opts) do
+    {config, _opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     path = Paths.search_facet(index, facet)
 
     body =
@@ -143,18 +143,18 @@ defmodule Algolia do
       |> Map.put("facetQuery", text)
       |> Jason.encode!()
 
-    send_request(:read, %{method: :post, path: path, body: body})
+    send_request(config, :read, %{method: :post, path: path, body: body})
   end
 
-  defp send_request(read_or_write, request, curr_retry \\ 0)
+  defp send_request(config, read_or_write, request, curr_retry \\ 0)
 
-  defp send_request(_read_or_write, _request, 4) do
+  defp send_request(%Config{}, _read_or_write, _request, 4) do
     {:error, "Unable to connect to Algolia"}
   end
 
-  defp send_request(read_or_write, request, curr_retry) do
-    url = request_url(read_or_write, curr_retry, request[:path])
-    headers = request_headers(request[:options] || [])
+  defp send_request(%Config{} = config, read_or_write, request, curr_retry) do
+    url = request_url(config, read_or_write, curr_retry, request[:path])
+    headers = request_headers(config, request[:options] || [])
     body = request[:body] || ""
 
     request[:method]
@@ -173,22 +173,22 @@ defmodule Algolia do
         {:error, code, response}
 
       _ ->
-        send_request(read_or_write, request, curr_retry + 1)
+        send_request(config, read_or_write, request, curr_retry + 1)
     end
   end
 
-  defp request_url(read_or_write, retry, path) do
-    "https://"
-    |> Path.join(host(read_or_write, retry))
-    |> Path.join(path)
+  defp request_url(config, read_or_write, retry, path) do
+    base_url = config.base_url_fn.(read_or_write, config.application_id, retry)
+
+    Path.join(base_url, path)
   end
 
-  defp request_headers(request_options) do
+  defp request_headers(config, request_options) do
     custom = request_options[:headers] || []
 
     default = [
-      {"X-Algolia-API-Key", api_key()},
-      {"X-Algolia-Application-Id", application_id()}
+      {"X-Algolia-API-Key", config.api_key},
+      {"X-Algolia-Application-Id", config.application_id}
     ]
 
     custom ++ default
@@ -198,10 +198,11 @@ defmodule Algolia do
   Get an object in an index by objectID
   """
   def get_object(index, object_id, opts \\ []) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     path = Paths.object(index, object_id)
 
-    :read
-    |> send_request(%{method: :get, path: path, options: opts[:request_options]})
+    config
+    |> send_request(:read, %{method: :get, path: path, options: opts[:request_options]})
     |> inject_index_into_response(index)
   end
 
@@ -211,14 +212,21 @@ defmodule Algolia do
   An attribute can be chosen as the objectID.
   """
   def add_object(index, object, opts \\ []) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+
     if opts[:id_attribute] do
       save_object(index, object, opts)
     else
       body = Jason.encode!(object)
       path = Paths.index(index)
 
-      :write
-      |> send_request(%{method: :post, path: path, body: body, options: opts[:request_options]})
+      config
+      |> send_request(:write, %{
+        method: :post,
+        path: path,
+        body: body,
+        options: opts[:request_options]
+      })
       |> inject_index_into_response(index)
     end
   end
@@ -229,12 +237,14 @@ defmodule Algolia do
   An attribute can be chosen as the objectID.
   """
   def add_objects(index, objects, opts \\ []) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+
     if opts[:id_attribute] do
       save_objects(index, objects, opts)
     else
       objects
       |> build_batch_request("addObject")
-      |> send_batch_request(index, opts[:request_options])
+      |> send_batch_request(config, index, opts[:request_options])
     end
   end
 
@@ -251,7 +261,7 @@ defmodule Algolia do
   def save_object(index, object, opts) when is_map(object) do
     id = object_id_for_save!(object, opts)
 
-    save_object(index, object, id, opts[:request_options])
+    save_object(index, object, id, opts)
   end
 
   defp object_id_for_save!(object, opts) do
@@ -266,12 +276,18 @@ defmodule Algolia do
     end
   end
 
-  defp save_object(index, object, object_id, request_options) do
+  defp save_object(index, object, object_id, opts) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     body = Jason.encode!(object)
     path = Paths.object(index, object_id)
 
-    :write
-    |> send_request(%{method: :put, path: path, body: body, options: request_options})
+    config
+    |> send_request(:write, %{
+      method: :put,
+      path: path,
+      body: body,
+      options: opts[:request_options]
+    })
     |> inject_index_into_response(index)
   end
 
@@ -279,23 +295,30 @@ defmodule Algolia do
   Save multiple objects
   """
   def save_objects(index, objects, opts \\ [id_attribute: :objectID]) when is_list(objects) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     id_attribute = opts[:id_attribute] || :objectID
 
     objects
     |> add_object_ids(id_attribute: id_attribute)
     |> build_batch_request("updateObject")
-    |> send_batch_request(index, opts[:request_options])
+    |> send_batch_request(config, index, opts[:request_options])
   end
 
   @doc """
   Partially updates an object, takes option upsert: true or false
   """
   def partial_update_object(index, object, object_id, opts \\ [upsert?: true]) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     body = Jason.encode!(object)
     path = Paths.partial_object(index, object_id, opts[:upsert?])
 
-    :write
-    |> send_request(%{method: :post, path: path, body: body, options: opts[:request_options]})
+    config
+    |> send_request(:write, %{
+      method: :post,
+      path: path,
+      body: body,
+      options: opts[:request_options]
+    })
     |> inject_index_into_response(index)
   end
 
@@ -303,6 +326,7 @@ defmodule Algolia do
   Partially updates multiple objects
   """
   def partial_update_objects(index, objects, opts \\ [upsert?: true, id_attribute: :objectID]) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     id_attribute = opts[:id_attribute] || :objectID
 
     upsert =
@@ -316,7 +340,7 @@ defmodule Algolia do
     objects
     |> add_object_ids(id_attribute: id_attribute)
     |> build_batch_request(action)
-    |> send_batch_request(index, opts[:request_options])
+    |> send_batch_request(config, index, opts[:request_options])
   end
 
   # No need to add any objectID by default
@@ -346,12 +370,12 @@ defmodule Algolia do
     end
   end
 
-  defp send_batch_request(requests, index, request_options) do
+  defp send_batch_request(requests, config, index, request_options) do
     path = Paths.batch(index)
     body = Jason.encode!(requests)
 
-    :write
-    |> send_request(%{method: :post, path: path, body: body, options: request_options})
+    config
+    |> send_request(:write, %{method: :post, path: path, body: body, options: request_options})
     |> inject_index_into_response(index)
   end
 
@@ -377,10 +401,11 @@ defmodule Algolia do
   end
 
   def delete_object(index, object_id, opts) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     path = Paths.object(index, object_id)
 
-    :write
-    |> send_request(%{method: :delete, path: path, options: opts[:request_options]})
+    config
+    |> send_request(:write, %{method: :delete, path: path, options: opts[:request_options]})
     |> inject_index_into_response(index)
   end
 
@@ -388,12 +413,14 @@ defmodule Algolia do
   Delete multiple objects
   """
   def delete_objects(index, object_ids, opts \\ []) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+
     object_ids
     |> Enum.map(fn id ->
       %{objectID: id}
     end)
     |> build_batch_request("deleteObject")
-    |> send_batch_request(index, opts[:request_options])
+    |> send_batch_request(config, index, opts[:request_options])
   end
 
   @doc """
@@ -414,6 +441,7 @@ defmodule Algolia do
       {:ok, %{"indexName" => "index", "taskId" => 42, "deletedAt" => "2018-10-30T15:33:13.556Z"}}
   """
   def delete_by(index, opts) when is_list(opts) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     {request_options, opts} = Keyword.pop(opts, :request_options)
 
     path = Paths.delete_by(index)
@@ -425,8 +453,8 @@ defmodule Algolia do
       |> Map.new()
       |> Jason.encode!()
 
-    :write
-    |> send_request(%{method: :post, path: path, body: body, options: request_options})
+    config
+    |> send_request(:write, %{method: :post, path: path, body: body, options: request_options})
     |> inject_index_into_response(index)
   end
 
@@ -448,68 +476,96 @@ defmodule Algolia do
   @doc """
   List all indexes
   """
-  def list_indexes do
-    send_request(:read, %{method: :get, path: Paths.indexes()})
+  def list_indexes(opts \\ []) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+
+    send_request(config, :read, %{
+      method: :get,
+      path: Paths.indexes(),
+      options: opts[:request_options]
+    })
   end
 
   @doc """
   Deletes the index
   """
-  def delete_index(index) do
-    :write
-    |> send_request(%{method: :delete, path: Paths.index(index)})
+  def delete_index(index, opts \\ []) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+
+    config
+    |> send_request(:write, %{
+      method: :delete,
+      path: Paths.index(index),
+      options: opts[:request_options]
+    })
     |> inject_index_into_response(index)
   end
 
   @doc """
   Clears all content of an index
   """
-  def clear_index(index) do
-    :write
-    |> send_request(%{method: :post, path: Paths.clear(index)})
+  def clear_index(index, opts \\ []) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+
+    config
+    |> send_request(:write, %{
+      method: :post,
+      path: Paths.clear(index),
+      options: opts[:request_options]
+    })
     |> inject_index_into_response(index)
   end
 
   @doc """
   Set the settings of a index
   """
-  def set_settings(index, settings) do
+  def set_settings(index, settings, opts \\ []) do
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     body = Jason.encode!(settings)
     path = Paths.settings(index)
 
-    :write
-    |> send_request(%{method: :put, path: path, body: body})
+    config
+    |> send_request(:write, %{
+      method: :put,
+      path: path,
+      body: body,
+      options: opts[:request_options]
+    })
     |> inject_index_into_response(index)
   end
 
   @doc """
   Get the settings of a index
   """
-  def get_settings(index) do
-    :read
-    |> send_request(%{method: :get, path: Paths.settings(index)})
+  def get_settings(index, opts \\ []) do
+    {config, _opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+
+    config
+    |> send_request(:read, %{method: :get, path: Paths.settings(index)})
     |> inject_index_into_response(index)
   end
 
   @doc """
   Moves an index to new one
   """
-  def move_index(src_index, dst_index) do
+  def move_index(src_index, dst_index, opts \\ []) do
+    {config, _opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     body = Jason.encode!(%{operation: "move", destination: dst_index})
 
-    :write
-    |> send_request(%{method: :post, path: Paths.operation(src_index), body: body})
+    config
+    |> send_request(:write, %{method: :post, path: Paths.operation(src_index), body: body})
     |> inject_index_into_response(src_index)
   end
 
   @doc """
   Copies an index to a new one
   """
-  def copy_index(src_index, dst_index) do
+  def copy_index(src_index, dst_index, opts \\ []) do
+    {config, _opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     body = Jason.encode!(%{operation: "copy", destination: dst_index})
 
-    :write
-    |> send_request(%{method: :post, path: Paths.operation(src_index), body: body})
+    config
+    |> send_request(:write, %{method: :post, path: Paths.operation(src_index), body: body})
     |> inject_index_into_response(src_index)
   end
 
@@ -536,15 +592,18 @@ defmodule Algolia do
     * `:type` - Type of log to retrieve: `all` (default), `query`, `build` or `error`.
   """
   def get_logs(opts \\ []) do
-    send_request(:write, %{method: :get, path: Paths.logs(opts)})
+    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+    send_request(config, :write, %{method: :get, path: Paths.logs(opts)})
   end
 
   @doc """
   Wait for a task for an index to complete
   returns :ok when it's done
   """
-  def wait_task(index, task_id, time_before_retry \\ 1000) do
-    case send_request(:write, %{method: :get, path: Paths.task(index, task_id)}) do
+  def wait_task(index, task_id, time_before_retry \\ 1000, opts \\ []) when is_list(opts) do
+    {config, _opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+
+    case send_request(config, :write, %{method: :get, path: Paths.task(index, task_id)}) do
       {:ok, %{"status" => "published"}} ->
         :ok
 
@@ -568,4 +627,6 @@ defmodule Algolia do
   def wait(response = {:ok, _}), do: wait(response, 1000)
   def wait(response = {:error, _}), do: response
   def wait(response), do: response
+
+  defp default_config, do: Config.new()
 end
