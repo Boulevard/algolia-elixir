@@ -1,5 +1,14 @@
 ## Algolia
 
+
+### Blvd Fork
+
+The Blvd fork of this repo is to allow us to pass in a config option that overwrites the api key, application id, and base url that is used to integrate with algolia. 
+This allows for multiple instances during test that don't rely on environment variables.
+
+The unit tests call out to the algolia server and Github Actions has the two required secrets pre-loaded. The free algolia account is limited to 10k tests per month.
+
+
 [![Build Status](https://semaphoreci.com/api/v1/sikanhe/algolia-elixir/branches/master/badge.svg)](https://semaphoreci.com/sikanhe/algolia-elixir)
 [![Inline docs](http://inch-ci.org/github/sikanhe/algolia-elixir.svg?branch=master)](http://inch-ci.org/github/sikanhe/algolia-elixir)
 
