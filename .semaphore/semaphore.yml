@@ -1,0 +1,128 @@
+version: v1.0
+name: sched
+agent:
+  machine:
+    type: e1-standard-2
+    os_image: ubuntu1804
+global_job_config:
+  prologue:
+    commands:
+      # This PPA no longer exists
+      - sudo rm -f /etc/apt/sources.list.d/python_2.7-source.list
+
+# When both erlang and matchworker need to be rebuilt the build can take
+# longer than the default limit of 1 hour
+execution_time_limit:
+  hours: 2
+
+blocks:
+  # Separate blocks for compiling the app and running the tests so that if we
+  # employ additional testing strategies in the future (e.g. linting), we can
+  # run those in parallel after compilation.
+  - name: Compilation
+    task:
+      env_vars:
+        - name: MIX_ENV
+          value: test
+        - name: MIX_HOME
+          value: /home/semaphore/.mix
+      secrets:
+        # Defines $HEX_API_KEY
+        - name: hex-pm
+      prologue:
+        # Setup steps that don't depend on the codebase should be run first,
+        # preferably in the prologue. This lets us potentially use these in a
+        # base container in the future.
+        commands:
+          # Get a newer version of CMake
+          - retry -t 3 -s 1 'curl "https://apt.kitware.com/keys/kitware-archive-latest.asc" | sudo apt-key add -'
+          - retry -t 3 -s 1 'sudo apt-add-repository "deb https://apt.kitware.com/ubuntu/ bionic main"'
+          - sudo apt-get install -y --only-upgrade cmake
+          # Change to a newer version of GCC
+          - sem-version c 8
+      jobs:
+        # We use partial cache key matching to look for the latest cached data
+        # in this preferred order:
+        #
+        # - same branch, same mix.lock checksum (for deps and build)
+        # - same branch
+        # - develop
+        # - master
+        #
+        # When writing into the cache, the commit SHA should be included in the
+        # key. This lets us restore exactly the same data in the following
+        # blocks.
+        #
+        # See <https://docs.semaphoreci.com/article/54-toolbox-reference#cache>
+        # for documentation.
+        - name: Compile
+          commands:
+            - checkout
+            # We need to restore/store asdf in $HOME because the cache uses tar
+            # internally and it strips the leading / from absolute paths.
+            - (cd $HOME && cache restore asdf-v0.7.2-$SEMAPHORE_GIT_BRANCH,asdf-v0.7.2-develop,asdf-v0.7.2-master)
+            - test -e $HOME/.asdf || git clone https://github.com/asdf-vm/asdf.git $HOME/.asdf --branch v0.7.2 --depth=1 --single-branch
+            - . $HOME/.asdf/asdf.sh
+            - for p in $(cut -f1 -d ' ' < .tool-versions); do asdf plugin-add "$p" || true; done
+            - asdf install
+            - mix do local.hex --force, local.rebar --force
+            - (cd $HOME && cache store asdf-v0.7.2-$SEMAPHORE_GIT_BRANCH-$SEMAPHORE_GIT_SHA .asdf)
+            - cache restore mix-home-$SEMAPHORE_GIT_BRANCH-$(checksum mix.lock),mix-home-$SEMAPHORE_GIT_BRANCH,mix-home-develop,mix-home-master
+            - cache restore mix-deps-$SEMAPHORE_GIT_BRANCH-$(checksum mix.lock),mix-deps-$SEMAPHORE_GIT_BRANCH,mix-deps-develop,mix-deps-master
+            - cache restore mix-build-$SEMAPHORE_GIT_BRANCH-$(checksum mix.lock),mix-build-$SEMAPHORE_GIT_BRANCH,mix-build-develop,mix-build-master
+            - mix hex.organization auth boulevard --key $HEX_API_KEY
+            - mix deps.get --only $MIX_ENV
+            - mix compile --all-warnings --warnings-as-errors
+            - mix dialyzer --plt
+            - cache store mix-home-$SEMAPHORE_GIT_BRANCH-$(checksum mix.lock)-$SEMAPHORE_GIT_SHA $MIX_HOME
+            - cache store mix-deps-$SEMAPHORE_GIT_BRANCH-$(checksum mix.lock)-$SEMAPHORE_GIT_SHA deps
+            - cache store mix-build-$SEMAPHORE_GIT_BRANCH-$(checksum mix.lock)-$SEMAPHORE_GIT_SHA _build
+  - name: Testing
+    # If any of these jobs take more than 30 minutes, something is probably wrong
+    execution_time_limit:
+      minutes: 30
+    task:
+      env_vars:
+        - name: MIX_ENV
+          value: test
+        - name: MIX_HOME
+          value: /home/semaphore/.mix
+      secrets:
+        # Defines the test environment variables
+        - name: sched-test
+      prologue:
+        commands:
+          - sem-service start redis 5
+          - sem-service start postgres 12
+          - sudo apt-get -y install postgresql-client
+          - sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+          - checkout
+          - (cd $HOME && cache restore asdf-v0.7.2-$SEMAPHORE_GIT_BRANCH-$SEMAPHORE_GIT_SHA)
+          - . $HOME/.asdf/asdf.sh
+          # kiex doesn't care about MIX_HOME, so Hex gets stored in ~/.kiex and
+          # never gets cached. smh, this causes problems when versions differ.
+          - mix do local.hex --force, local.rebar --force
+          - cache restore mix-deps-$SEMAPHORE_GIT_BRANCH-$(checksum mix.lock)-$SEMAPHORE_GIT_SHA
+          - cache restore mix-build-$SEMAPHORE_GIT_BRANCH-$(checksum mix.lock)-$SEMAPHORE_GIT_SHA
+      jobs:
+        - name: Run tests
+          parallelism: 4
+          commands:
+            - mix reset_db
+            - MIX_TEST_PARTITION=$SEMAPHORE_JOB_INDEX mix test --partitions $SEMAPHORE_JOB_COUNT
+        - name: Run formatting check
+          commands:
+            - mix format --check-formatted
+        - name: Run Credo
+          commands:
+            - mix credo list --format oneline
+        - name: Run Dialyzer
+          commands:
+            - mix dialyzer --format short --halt-exit-status
+        - name: Credo check tests
+          commands:
+            - cd credo_checks && mix deps.get && mix test
+      epilogue:
+        always:
+          commands:
+            - test-results publish /tmp/junit.xml
