@@ -187,6 +187,7 @@ defmodule Algolia do
     custom = request_options[:headers] || []
 
     default = [
+      {"content-type", "application/json; charset=UTF-8"},
       {"X-Algolia-API-Key", config.api_key},
       {"X-Algolia-Application-Id", config.application_id}
     ]
