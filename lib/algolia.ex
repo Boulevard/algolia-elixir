@@ -620,13 +620,21 @@ defmodule Algolia do
   Convinient version of wait_task/4, accepts a response to be waited on
   directly. This enables piping a operation directly into wait_task
   """
-  def wait(response = {:ok, %{"indexName" => index, "taskID" => task_id}}, time_before_retry) do
-    with :ok <- wait_task(index, task_id, time_before_retry), do: response
+
+  def wait(response, opts \\ [])
+
+  def wait(response, time_before_retry) when is_integer(time_before_retry) do
+    wait(response, time_before_retry: time_before_retry)
   end
 
-  def wait(response = {:ok, _}), do: wait(response, 1000)
-  def wait(response = {:error, _}), do: response
-  def wait(response), do: response
+  def wait(response = {:ok, %{"indexName" => index, "taskID" => task_id}}, opts) do
+    {time_before_retry, opts} = Keyword.pop(opts, :time_before_retry, 1000)
+
+    with :ok <- wait_task(index, task_id, time_before_retry, opts), do: response
+  end
+
+  def wait(response = {:error, _}, _opts), do: response
+  def wait(response, _opts), do: response
 
   defp default_config, do: Config.new()
 end
