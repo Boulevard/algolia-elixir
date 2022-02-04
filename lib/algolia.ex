@@ -618,7 +618,7 @@ defmodule Algolia do
 
       {:ok, %{"status" => "notPublished"}} ->
         :timer.sleep(time_before_retry)
-        wait_task(index, task_id, time_before_retry)
+        wait_task(index, task_id, time_before_retry, opts)
 
       other ->
         other
