@@ -295,7 +295,7 @@ defmodule Algolia do
   @doc """
   Save multiple objects
   """
-  def save_objects(index, objects, opts \\ [id_attribute: :objectID]) when is_list(objects) do
+  def save_objects(index, objects, opts \\ []) when is_list(objects) do
     {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
     id_attribute = opts[:id_attribute] || :objectID
 
@@ -308,8 +308,12 @@ defmodule Algolia do
   @doc """
   Partially updates an object, takes option upsert: true or false
   """
-  def partial_update_object(index, object, object_id, opts \\ [upsert?: true]) do
-    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+  def partial_update_object(index, object, object_id, opts \\ []) do
+    {config, opts} =
+      opts
+      |> Keyword.put_new(:upsert?, true)
+      |> Keyword.pop_lazy(:config, &default_config/0)
+
     body = Jason.encode!(object)
     path = Paths.partial_object(index, object_id, opts[:upsert?])
 
@@ -326,8 +330,12 @@ defmodule Algolia do
   @doc """
   Partially updates multiple objects
   """
-  def partial_update_objects(index, objects, opts \\ [upsert?: true, id_attribute: :objectID]) do
-    {config, opts} = Keyword.pop_lazy(opts, :config, &default_config/0)
+  def partial_update_objects(index, objects, opts \\ []) do
+    {config, opts} =
+      opts
+      |> Keyword.put_new(:upsert?, true)
+      |> Keyword.pop_lazy(:config, &default_config/0)
+
     id_attribute = opts[:id_attribute] || :objectID
 
     upsert =
