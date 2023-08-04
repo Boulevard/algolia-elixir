@@ -157,20 +157,27 @@ defmodule Algolia do
     headers = request_headers(config, request[:options] || [])
     body = request[:body] || ""
 
-    request[:method]
-    |> :hackney.request(url, headers, body, [
-      :with_body,
-      path_encode_fun: &URI.encode/1,
-      connect_timeout: 3_000 * (curr_retry + 1),
-      recv_timeout: 30_000 * (curr_retry + 1),
-      ssl_options: [{:versions, [:"tlsv1.2"]}]
-    ])
+    tesla_client()
+    |> Tesla.request(
+      method: request[:method],
+      url: url,
+      headers: headers,
+      body: body,
+      opts: [
+        adapter: [
+          path_encode_fun: &URI.encode/1,
+          connect_timeout: 3_000 * (curr_retry + 1),
+          recv_timeout: 30_000 * (curr_retry + 1),
+          ssl_options: [{:versions, [:"tlsv1.2"]}]
+        ]
+      ]
+    )
     |> case do
-      {:ok, code, _headers, response} when code in 200..299 ->
-        {:ok, Jason.decode!(response)}
+      {:ok, %Tesla.Env{status: status} = env} when status in 200..299 ->
+        {:ok, env.body}
 
-      {:ok, code, _, response} ->
-        {:error, code, response}
+      {:ok, %Tesla.Env{} = env} ->
+        {:error, env.status, env.body}
 
       _ ->
         send_request(config, read_or_write, request, curr_retry + 1)
@@ -646,4 +653,14 @@ defmodule Algolia do
   def wait(response, _opts), do: response
 
   defp default_config, do: Config.new()
+
+  defp tesla_client do
+    Tesla.client(
+      [
+        Tesla.Middleware.Telemetry,
+        Tesla.Middleware.JSON
+      ],
+      Tesla.Adapter.Hackney
+    )
+  end
 end
