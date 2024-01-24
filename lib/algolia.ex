@@ -477,9 +477,7 @@ defmodule Algolia do
   defp sanitize_delete_by_opts(opts) do
     Keyword.drop(opts, [
       :hitsPerPage,
-      :attributesToRetrieve,
-      "hitsPerPage",
-      "attributesToRetrieve"
+      :attributesToRetrieve
     ])
   end
 
