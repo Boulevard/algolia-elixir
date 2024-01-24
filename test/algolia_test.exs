@@ -7,8 +7,6 @@ defmodule AlgoliaTest do
     "test",
     "test_1",
     "test_2",
-    "test_3",
-    "test_4",
     "multi_test_1",
     "multi_test_2",
     "delete_by_test_1",
@@ -101,9 +99,9 @@ defmodule AlgoliaTest do
     count = :rand.uniform(10)
     docs = Enum.map(1..count, &%{id: &1, test: "search_single_index"})
 
-    {:ok, _} = save_objects("test_3", docs, id_attribute: :id) |> wait
+    {:ok, _} = save_objects("test_1", docs, id_attribute: :id) |> wait
 
-    {:ok, %{"hits" => hits1}} = search("test_3", "search_single_index")
+    {:ok, %{"hits" => hits1}} = search("test_1", "search_single_index")
     assert length(hits1) === count
   end
 
@@ -112,13 +110,13 @@ defmodule AlgoliaTest do
     count = :rand.uniform(10)
     docs = Enum.map(1..count, &%{id: &1, test: "search with list opts"})
 
-    {:ok, _} = save_objects("test_3", docs, id_attribute: :id) |> wait
+    {:ok, _} = save_objects("test_1", docs, id_attribute: :id) |> wait
 
     opts = [
       responseFields: ["hits", "nbPages"]
     ]
 
-    {:ok, response} = search("test_3", "search_with_list_opts", opts)
+    {:ok, response} = search("test_1", "search_with_list_opts", opts)
 
     assert response["hits"]
     assert response["nbPages"]
@@ -128,10 +126,10 @@ defmodule AlgoliaTest do
   test "search > 1 pages" do
     docs = Enum.map(1..40, &%{id: &1, test: "search_more_than_one_pages"})
 
-    {:ok, _} = save_objects("test_3", docs, id_attribute: :id) |> wait
+    {:ok, _} = save_objects("test_1", docs, id_attribute: :id) |> wait
 
     {:ok, %{"hits" => hits, "page" => page}} =
-      search("test_3", "search_more_than_one_pages", page: 1)
+      search("test_1", "search_more_than_one_pages", page: 1)
 
     assert page == 1
     assert length(hits) === 20
@@ -161,7 +159,7 @@ defmodule AlgoliaTest do
 
   test "search for facet values" do
     {:ok, _} =
-      "test_4"
+      "test_1"
       |> set_settings(%{attributesForFaceting: ["searchable(family)"]})
       |> wait
 
@@ -171,9 +169,9 @@ defmodule AlgoliaTest do
       %{family: "Dipteridaceae", name: "D. nieuwenhuisii"}
     ]
 
-    {:ok, _} = "test_4" |> add_objects(docs) |> wait
+    {:ok, _} = "test_1" |> add_objects(docs) |> wait
 
-    {:ok, %{"facetHits" => hits}} = search_for_facet_values("test_4", "family", "Dip")
+    {:ok, %{"facetHits" => hits}} = search_for_facet_values("test_1", "family", "Dip")
 
     assert [
              %{
@@ -227,21 +225,21 @@ defmodule AlgoliaTest do
     id = "partial_update_upsert_false"
 
     assert {:ok, _} =
-             partial_update_object("test_3", %{update: "updated"}, id, upsert?: false)
+             partial_update_object("test_1", %{update: "updated"}, id, upsert?: false)
              |> wait
 
-    assert {:error, 404, _} = get_object("test_3", id)
+    assert {:error, 404, _} = get_object("test_1", id)
   end
 
   test "partially update multiple objects, upsert is default" do
     objects = [%{id: "partial_update_multiple_1"}, %{id: "partial_update_multiple_2"}]
 
     assert {:ok, _} =
-             partial_update_objects("test_3", objects, id_attribute: :id)
+             partial_update_objects("test_1", objects, id_attribute: :id)
              |> wait
 
-    assert {:ok, _} = get_object("test_3", "partial_update_multiple_1")
-    assert {:ok, _} = get_object("test_3", "partial_update_multiple_2")
+    assert {:ok, _} = get_object("test_1", "partial_update_multiple_1")
+    assert {:ok, _} = get_object("test_1", "partial_update_multiple_2")
   end
 
   test "partially update multiple objects, upsert is false" do
@@ -251,11 +249,11 @@ defmodule AlgoliaTest do
     ]
 
     assert {:ok, _} =
-             partial_update_objects("test_3", objects, id_attribute: :id, upsert?: false)
+             partial_update_objects("test_1", objects, id_attribute: :id, upsert?: false)
              |> wait
 
-    assert {:error, 404, _} = get_object("test_3", "partial_update_multiple_1_no_upsert")
-    assert {:error, 404, _} = get_object("test_3", "partial_update_multiple_2_no_upsert")
+    assert {:error, 404, _} = get_object("test_1", "partial_update_multiple_1_no_upsert")
+    assert {:error, 404, _} = get_object("test_1", "partial_update_multiple_2_no_upsert")
   end
 
   test "delete object" do
