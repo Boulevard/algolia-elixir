@@ -33,6 +33,7 @@ defmodule Algolia.Mixfile do
       {:tesla, "~> 1.5"},
       {:telemetry, "~> 0.4 or ~> 1.0"},
       {:jason, "~> 1.0"},
+      {:styler, "~> 0.11", only: [:dev, :test], runtime: false},
       # Docs
       {:ex_doc, "~> 0.19", only: :dev},
       {:inch_ex, ">= 0.0.0", only: :dev}

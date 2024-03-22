@@ -3,7 +3,8 @@ defmodule Algolia.Config do
   Configuration for algolia API client
   """
 
-  alias Algolia.{MissingAPIKeyError, MissingApplicationIDError}
+  alias Algolia.MissingAPIKeyError
+  alias Algolia.MissingApplicationIDError
 
   @type t :: %__MODULE__{
           application_id: application_id,
