@@ -5,52 +5,44 @@ defmodule AlgoliaTest do
 
   @indexes [
     "test",
-    "test_1",
-    "test_2",
-    "test_3",
-    "test_4",
     "multi_test_1",
     "multi_test_2",
     "delete_by_test_1",
     "move_index_test_src",
     "move_index_test_dst",
     "copy_index_src",
-    "copy_index_dst"
+    "copy_index_dst",
+    "search_index",
+    "settings_test"
   ]
 
-  @settings_test_index "settings_test"
-
   setup_all do
-    on_exit(fn ->
-      delete_index(@settings_test_index)
-    end)
-
     @indexes
-    |> Enum.map(&clear_index/1)
+    |> Enum.map(&delete_index/1)
     |> Enum.each(&wait/1)
   end
 
   test "add object" do
     {:ok, %{"objectID" => object_id}} =
-      "test_1"
+      "test"
       |> add_object(%{text: "hello"})
-      |> wait
+      |> wait()
 
-    assert {:ok, %{"text" => "hello"}} = get_object("test_1", object_id)
+    assert {:ok, %{"text" => "hello"}} = get_object("test", object_id)
   end
 
   test "add multiple objects" do
     assert {:ok, %{"objectIDs" => ids}} =
-             "test_1"
+             "test"
              |> add_objects([
                %{text: "add multiple test"},
                %{text: "add multiple test"},
                %{text: "add multiple test"}
              ])
-             |> wait
+             |> wait(3_000)
 
     for id <- ids do
-      assert {:ok, %{"text" => "add multiple test"}} = get_object("test_1", id)
+      assert {:ok, %{"text" => "add multiple test"}} = get_object("test", id)
     end
   end
 
@@ -62,12 +54,11 @@ defmodule AlgoliaTest do
     :rand.seed(:exs1024, :erlang.timestamp())
     object_id = :rand.uniform(1_000_000) |> to_string
 
-    {:ok, %{"objectID" => ^object_id, "taskID" => task_id}} =
-      save_object("test_1", %{}, object_id)
+    {:ok, %{"objectID" => ^object_id, "taskID" => task_id}} = save_object("test", %{}, object_id)
 
-    wait_task("test_1", task_id)
+    wait_task("test", task_id)
 
-    assert {:ok, %{"objectID" => ^object_id}} = get_object("test_1", object_id)
+    assert {:ok, %{"objectID" => ^object_id}} = get_object("test", object_id)
   end
 
   test "save one object, and then read it, using wait_task pipeing" do
@@ -75,23 +66,23 @@ defmodule AlgoliaTest do
     id = :rand.uniform(1_000_000) |> to_string
 
     {:ok, %{"objectID" => object_id}} =
-      save_object("test_1", %{}, id)
-      |> wait
+      save_object("test", %{}, id)
+      |> wait()
 
     assert object_id == id
-    assert {:ok, %{"objectID" => ^object_id}} = get_object("test_1", id)
+    assert {:ok, %{"objectID" => ^object_id}} = get_object("test", id)
   end
 
   describe "save_object/2" do
     test "requires an objectID attribute" do
       assert_raise ArgumentError, ~r/must have an objectID/, fn ->
-        save_object("test_1", %{"noObjectId" => "raises error"})
+        save_object("test", %{"noObjectId" => "raises error"})
       end
     end
 
     test "requires a valid attribute as object id" do
       assert_raise ArgumentError, ~r/does not have a 'id' attribute/, fn ->
-        save_object("test_1", %{"noId" => "raises error"}, id_attribute: "id")
+        save_object("test", %{"noId" => "raises error"}, id_attribute: "id")
       end
     end
   end
@@ -101,9 +92,9 @@ defmodule AlgoliaTest do
     count = :rand.uniform(10)
     docs = Enum.map(1..count, &%{id: &1, test: "search_single_index"})
 
-    {:ok, _} = save_objects("test_3", docs, id_attribute: :id) |> wait
+    {:ok, _} = save_objects("test", docs, id_attribute: :id) |> wait()
 
-    {:ok, %{"hits" => hits1}} = search("test_3", "search_single_index")
+    {:ok, %{"hits" => hits1}} = search("test", "search_single_index")
     assert length(hits1) === count
   end
 
@@ -112,13 +103,13 @@ defmodule AlgoliaTest do
     count = :rand.uniform(10)
     docs = Enum.map(1..count, &%{id: &1, test: "search with list opts"})
 
-    {:ok, _} = save_objects("test_3", docs, id_attribute: :id) |> wait
+    {:ok, _} = save_objects("test", docs, id_attribute: :id) |> wait()
 
     opts = [
       responseFields: ["hits", "nbPages"]
     ]
 
-    {:ok, response} = search("test_3", "search_with_list_opts", opts)
+    {:ok, response} = search("test", "search_with_list_opts", opts)
 
     assert response["hits"]
     assert response["nbPages"]
@@ -128,10 +119,10 @@ defmodule AlgoliaTest do
   test "search > 1 pages" do
     docs = Enum.map(1..40, &%{id: &1, test: "search_more_than_one_pages"})
 
-    {:ok, _} = save_objects("test_3", docs, id_attribute: :id) |> wait
+    {:ok, _} = save_objects("test", docs, id_attribute: :id) |> wait()
 
     {:ok, %{"hits" => hits, "page" => page}} =
-      search("test_3", "search_more_than_one_pages", page: 1)
+      search("test", "search_more_than_one_pages", page: 1)
 
     assert page == 1
     assert length(hits) === 20
@@ -161,9 +152,9 @@ defmodule AlgoliaTest do
 
   test "search for facet values" do
     {:ok, _} =
-      "test_4"
+      "test"
       |> set_settings(%{attributesForFaceting: ["searchable(family)"]})
-      |> wait
+      |> wait()
 
     docs = [
       %{family: "Diplaziopsidaceae", name: "D. cavaleriana"},
@@ -171,9 +162,9 @@ defmodule AlgoliaTest do
       %{family: "Dipteridaceae", name: "D. nieuwenhuisii"}
     ]
 
-    {:ok, _} = "test_4" |> add_objects(docs) |> wait
+    {:ok, _} = "test" |> add_objects(docs) |> wait()
 
-    {:ok, %{"facetHits" => hits}} = search_for_facet_values("test_4", "family", "Dip")
+    {:ok, %{"facetHits" => hits}} = search_for_facet_values("test", "family", "Dip")
 
     assert [
              %{
@@ -198,17 +189,17 @@ defmodule AlgoliaTest do
   end
 
   test "search query with special characters" do
-    {:ok, %{"hits" => _}} = search("test_1", "foo & bar")
+    {:ok, %{"hits" => _}} = search("test", "foo & bar") |> wait()
   end
 
   test "partially update object" do
     {:ok, %{"objectID" => object_id}} =
-      save_object("test_2", %{id: "partially_update_object"}, id_attribute: :id)
-      |> wait
+      save_object("test", %{id: "partially_update_object"}, id_attribute: :id)
+      |> wait()
 
-    assert {:ok, _} = partial_update_object("test_2", %{update: "updated"}, object_id) |> wait
+    assert {:ok, _} = partial_update_object("test", %{update: "updated"}, object_id) |> wait()
 
-    {:ok, object} = get_object("test_2", object_id)
+    {:ok, object} = get_object("test", object_id)
     assert object["update"] == "updated"
   end
 
@@ -216,10 +207,10 @@ defmodule AlgoliaTest do
     id = "partially_update_object_upsert_true"
 
     assert {:ok, _} =
-             partial_update_object("test_2", %{}, id)
-             |> wait
+             partial_update_object("test", %{}, id)
+             |> wait()
 
-    {:ok, object} = get_object("test_2", id)
+    {:ok, object} = get_object("test", id)
     assert object["objectID"] == id
   end
 
@@ -227,21 +218,21 @@ defmodule AlgoliaTest do
     id = "partial_update_upsert_false"
 
     assert {:ok, _} =
-             partial_update_object("test_3", %{update: "updated"}, id, upsert?: false)
-             |> wait
+             partial_update_object("test", %{update: "updated"}, id, upsert?: false)
+             |> wait()
 
-    assert {:error, 404, _} = get_object("test_3", id)
+    assert {:error, 404, _} = get_object("test", id)
   end
 
   test "partially update multiple objects, upsert is default" do
     objects = [%{id: "partial_update_multiple_1"}, %{id: "partial_update_multiple_2"}]
 
     assert {:ok, _} =
-             partial_update_objects("test_3", objects, id_attribute: :id)
-             |> wait
+             partial_update_objects("test", objects, id_attribute: :id)
+             |> wait()
 
-    assert {:ok, _} = get_object("test_3", "partial_update_multiple_1")
-    assert {:ok, _} = get_object("test_3", "partial_update_multiple_2")
+    assert {:ok, _} = get_object("test", "partial_update_multiple_1")
+    assert {:ok, _} = get_object("test", "partial_update_multiple_2")
   end
 
   test "partially update multiple objects, upsert is false" do
@@ -251,21 +242,21 @@ defmodule AlgoliaTest do
     ]
 
     assert {:ok, _} =
-             partial_update_objects("test_3", objects, id_attribute: :id, upsert?: false)
-             |> wait
+             partial_update_objects("test", objects, id_attribute: :id, upsert?: false)
+             |> wait()
 
-    assert {:error, 404, _} = get_object("test_3", "partial_update_multiple_1_no_upsert")
-    assert {:error, 404, _} = get_object("test_3", "partial_update_multiple_2_no_upsert")
+    assert {:error, 404, _} = get_object("test", "partial_update_multiple_1_no_upsert")
+    assert {:error, 404, _} = get_object("test", "partial_update_multiple_2_no_upsert")
   end
 
   test "delete object" do
     {:ok, %{"objectID" => object_id}} =
-      save_object("test_1", %{id: "delete_object"}, id_attribute: :id)
-      |> wait
+      save_object("test", %{id: "delete_object"}, id_attribute: :id)
+      |> wait()
 
-    delete_object("test_1", object_id) |> wait
+    delete_object("test", object_id) |> wait()
 
-    assert {:error, 404, _} = get_object("test_1", object_id)
+    assert {:error, 404, _} = get_object("test", object_id)
   end
 
   test "deleting an object with empty string should return an error" do
@@ -276,13 +267,13 @@ defmodule AlgoliaTest do
     objects = [%{id: "delete_multipel_objects_1"}, %{id: "delete_multipel_objects_2"}]
 
     {:ok, %{"objectIDs" => object_ids}} =
-      save_objects("test_1", objects, id_attribute: :id)
-      |> wait
+      save_objects("test", objects, id_attribute: :id)
+      |> wait()
 
-    delete_objects("test_1", object_ids) |> wait
+    delete_objects("test", object_ids) |> wait()
 
-    assert {:error, 404, _} = get_object("test_1", "delete_multipel_objects_1")
-    assert {:error, 404, _} = get_object("test_1", "delete_multipel_objects_2")
+    assert {:error, 404, _} = get_object("test", "delete_multipel_objects_1")
+    assert {:error, 404, _} = get_object("test", "delete_multipel_objects_2")
   end
 
   describe "delete_by/2" do
@@ -290,19 +281,19 @@ defmodule AlgoliaTest do
       {:ok, _} =
         "delete_by_test_1"
         |> set_settings(%{attributesForFaceting: ["filterOnly(score)"]})
-        |> wait
+        |> wait()
 
       objects = [%{id: "gets deleted", score: 10}, %{id: "remains there", score: 20}]
 
       {:ok, _} =
         "delete_by_test_1"
         |> save_objects(objects, id_attribute: :id)
-        |> wait
+        |> wait()
 
       results =
         "delete_by_test_1"
         |> delete_by(filters: "score < 15")
-        |> wait
+        |> wait()
 
       assert {:ok, _} = results
 
@@ -327,12 +318,11 @@ defmodule AlgoliaTest do
     attributesToIndex = ~w(foo bar baz)
 
     assert {:ok, _} =
-             @settings_test_index
+             "settings_test"
              |> set_settings(%{attributesToIndex: attributesToIndex})
-             |> wait
+             |> wait()
 
-    assert {:ok, %{"attributesToIndex" => ^attributesToIndex}} =
-             get_settings(@settings_test_index)
+    assert {:ok, %{"attributesToIndex" => ^attributesToIndex}} = get_settings("settings_test")
   end
 
   test "move index" do
@@ -341,8 +331,8 @@ defmodule AlgoliaTest do
 
     objects = [%{id: "move_1"}, %{id: "move_2"}]
 
-    {:ok, _} = save_objects(src, objects, id_attribute: :id) |> wait
-    {:ok, _} = move_index(src, dst) |> wait
+    {:ok, _} = save_objects(src, objects, id_attribute: :id) |> wait()
+    {:ok, _} = move_index(src, dst) |> wait()
 
     assert {:ok, %{"objectID" => "move_1"}} = get_object(dst, "move_1")
     assert {:ok, %{"objectID" => "move_2"}} = get_object(dst, "move_2")
@@ -354,8 +344,8 @@ defmodule AlgoliaTest do
 
     objects = [%{id: "copy_1"}, %{id: "copy_2"}]
 
-    {:ok, _} = save_objects(src, objects, id_attribute: :id) |> wait
-    {:ok, _} = copy_index(src, dst) |> wait
+    {:ok, _} = save_objects(src, objects, id_attribute: :id) |> wait()
+    {:ok, _} = copy_index(src, dst) |> wait()
 
     assert {:ok, %{"objectID" => "copy_1"}} = get_object(dst, "copy_1")
     assert {:ok, %{"objectID" => "copy_2"}} = get_object(dst, "copy_2")
@@ -376,22 +366,29 @@ defmodule AlgoliaTest do
   end
 
   test "get index logs" do
-    {:ok, _} = search("test", "test query")
+    {:ok, _} =
+      "search_index"
+      |> add_object(%{text: "hello"})
+      |> wait()
 
-    assert {:ok, %{"logs" => [log]}} = get_logs(indexName: "test", length: 1, type: :query)
-    assert %{"index" => "test", "query_params" => "query=test+query"} = log
+    {:ok, _} = search("search_index", "test query") |> wait()
+
+    assert {:ok, %{"logs" => [log]}} =
+             get_logs(indexName: "search_index", length: 1, type: :query)
+
+    assert %{"index" => "search_index", "query_params" => "query=test+query"} = log
   end
 
   test "forwards extra HTTP headers" do
     opts = [headers: [{"X-Forwarded-For", "1.2.3.4"}]]
 
     {:ok, _} =
-      "test"
+      "search_index"
       |> add_object(%{text: "hello"}, request_options: opts)
-      |> wait
+      |> wait()
 
-    {:ok, %{"logs" => [log]}} = get_logs(indexName: "test", length: 1, type: :build)
-    %{"index" => "test", "query_headers" => headers} = log
+    {:ok, %{"logs" => [log]}} = get_logs(indexName: "search_index", length: 1, type: :build)
+    %{"index" => "search_index", "query_headers" => headers} = log
     assert headers =~ ~r/X-Forwarded-For: 1\.2\.3\.4/
   end
 end
