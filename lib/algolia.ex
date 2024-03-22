@@ -157,8 +157,7 @@ defmodule Algolia do
     headers = request_headers(config, request[:options] || [])
     body = request[:body] || ""
 
-    tesla_client()
-    |> Tesla.request(
+    request = [
       method: request[:method],
       url: url,
       headers: headers,
@@ -168,11 +167,19 @@ defmodule Algolia do
           path_encode_fun: &URI.encode/1,
           connect_timeout: 3_000 * (curr_retry + 1),
           recv_timeout: 30_000 * (curr_retry + 1),
-          ssl_options: [{:versions, [:"tlsv1.2"]}]
+          ssl_options: [
+            verify: :verify_peer,
+            versions: [:"tlsv1.2"],
+            cacerts: :public_key.cacerts_get(),
+            customize_hostname_check: [
+              match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+            ]
+          ]
         ]
       ]
-    )
-    |> case do
+    ]
+
+    case Tesla.request(tesla_client(), request) do
       {:ok, %Tesla.Env{status: status} = env} when status in 200..299 ->
         {:ok, env.body}
 
