@@ -7,6 +7,7 @@ defmodule Algolia do
   alias Algolia.Paths
 
   defmodule MissingApplicationIDError do
+    @moduledoc false
     defexception message: """
                    The `application_id` settings is required to use Algolia. Please include your
                    application_id in your application config file like so:
@@ -17,6 +18,7 @@ defmodule Algolia do
   end
 
   defmodule MissingAPIKeyError do
+    @moduledoc false
     defexception message: """
                    The `api_key` settings is required to use Algolia. Please include your
                    api key in your application config file like so:
@@ -27,6 +29,7 @@ defmodule Algolia do
   end
 
   defmodule InvalidObjectIDError do
+    @moduledoc false
     defexception message: "The ObjectID cannot be an empty string"
   end
 
@@ -57,7 +60,7 @@ defmodule Algolia do
       Enum.map(queries, fn query ->
         index_name = query[:index_name] || query["index_name"]
 
-        if !index_name,
+        unless index_name,
           do: raise(ArgumentError, message: "Missing index_name for one of the multiple queries")
 
         params =
@@ -374,7 +377,7 @@ defmodule Algolia do
     Enum.map(objects, fn object ->
       object_id = object[attribute] || object[to_string(attribute)]
 
-      if !object_id do
+      unless object_id do
         raise ArgumentError, message: "id attribute `#{attribute}` doesn't exist"
       end
 
@@ -648,13 +651,13 @@ defmodule Algolia do
     wait(response, time_before_retry: time_before_retry)
   end
 
-  def wait(response = {:ok, %{"indexName" => index, "taskID" => task_id}}, opts) do
+  def wait({:ok, %{"indexName" => index, "taskID" => task_id}} = response, opts) do
     {time_before_retry, opts} = Keyword.pop(opts, :time_before_retry, 1000)
 
     with :ok <- wait_task(index, task_id, time_before_retry, opts), do: response
   end
 
-  def wait(response = {:error, _}, _opts), do: response
+  def wait({:error, _} = response, _opts), do: response
   def wait(response, _opts), do: response
 
   defp default_config, do: Config.new()
