@@ -168,6 +168,7 @@ defmodule Algolia do
           connect_timeout: 3_000 * (curr_retry + 1),
           recv_timeout: 30_000 * (curr_retry + 1),
           ssl_options: [
+            {:verify, :verify_peer},
             {:versions, [:"tlsv1.2"]},
             {:cacerts, :public_key.cacerts_get()},
             {:customize_hostname_check,
