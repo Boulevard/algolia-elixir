@@ -29,8 +29,7 @@ defmodule Algolia.Mixfile do
 
   defp deps do
     [
-      {:hackney, "~> 1.9 or ~> 1.10"},
-      {:tesla, "~> 1.5"},
+      {:req, "~> 0.4.0"},
       {:telemetry, "~> 0.4 or ~> 1.0"},
       {:jason, "~> 1.0"},
       # Docs

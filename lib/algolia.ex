@@ -157,27 +157,24 @@ defmodule Algolia do
     headers = request_headers(config, request[:options] || [])
     body = request[:body] || ""
 
-    tesla_client()
-    |> Tesla.request(
-      method: request[:method],
-      url: url,
-      headers: headers,
-      body: body,
-      opts: [
-        adapter: [
-          path_encode_fun: &URI.encode/1,
-          connect_timeout: 3_000 * (curr_retry + 1),
-          recv_timeout: 30_000 * (curr_retry + 1),
-          ssl_options: [{:versions, [:"tlsv1.2"]}]
-        ]
-      ]
-    )
-    |> case do
-      {:ok, %Tesla.Env{status: status} = env} when status in 200..299 ->
-        {:ok, env.body}
+    request =
+      Req.new(
+        method: request[:method],
+        url: url,
+        headers: headers,
+        body: body,
+        connect_options: [
+          timeout: 3_000 * (curr_retry + 1)
+        ],
+        receive_timeout: 30_000 * (curr_retry + 1)
+      )
 
-      {:ok, %Tesla.Env{} = env} ->
-        {:error, env.status, env.body}
+    case Req.request(request) do
+      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
+        {:ok, body}
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        {:error, status, body}
 
       _ ->
         send_request(config, read_or_write, request, curr_retry + 1)
@@ -187,7 +184,7 @@ defmodule Algolia do
   defp request_url(config, read_or_write, retry, path) do
     base_url = config.base_url_fn.(read_or_write, config.application_id, retry)
 
-    Path.join(base_url, path)
+    Path.join(base_url, URI.encode(path))
   end
 
   defp request_headers(config, request_options) do
@@ -651,14 +648,4 @@ defmodule Algolia do
   def wait(response, _opts), do: response
 
   defp default_config, do: Config.new()
-
-  defp tesla_client do
-    Tesla.client(
-      [
-        Tesla.Middleware.Telemetry,
-        Tesla.Middleware.JSON
-      ],
-      Tesla.Adapter.Hackney
-    )
-  end
 end
